@@ -1,0 +1,66 @@
+@echo off
+setlocal EnableExtensions EnableDelayedExpansion
+
+:: ===== 설정 =====
+set "ROOT=D:\Total"
+
+echo [INFO] Root: %ROOT%
+if not exist "%ROOT%" (
+  echo [ERR] ROOT not found: %ROOT%
+  exit /b 1
+)
+
+for /r "%ROOT%" %%D in (.git) do (
+  set "REPO=%%~dpD"
+  set "REPO=!REPO:~0,-5!"  :: strip trailing ".git\"
+  echo.
+  echo === Repo: !REPO! ===
+
+  :: fetch --all --prune
+  git -C "!REPO!" fetch --all --prune
+
+  :: dirty check
+  set "DIRTY="
+  for /f "usebackq delims=" %%S in (`git -C "!REPO!" status --porcelain`) do (
+    set "DIRTY=1"
+    goto :after_dirty
+  )
+:after_dirty
+
+  if defined DIRTY (
+    echo [SKIP] dirty working tree
+    goto :continue_loop
+  )
+
+  :: upstream check
+  set "UPSTREAM="
+  for /f "usebackq delims=" %%U in (`git -C "!REPO!" rev-parse --abbrev-ref "@{u}" 2^>NUL`) do (
+    set "UPSTREAM=%%U"
+  )
+  if not defined UPSTREAM (
+    echo [SKIP] no upstream tracking branch
+    goto :continue_loop
+  )
+
+  :: pull ff-only
+  git -C "!REPO!" pull --ff-only
+
+  :: ahead check -> push
+  set "AHEAD=0"
+  for /f "usebackq tokens=1,2" %%L in (`git -C "!REPO!" rev-list --left-right --count @{u}...HEAD`) do (
+    set "BEHIND=%%L"
+    set "AHEAD=%%M"
+  )
+  if "!AHEAD!" NEQ "0" (
+    git -C "!REPO!" push
+    echo [PUSH] pushed upstream
+  ) else (
+    echo [OK] up-to-date
+  )
+
+:continue_loop
+)
+
+echo.
+echo [DONE] Safe sync finished.
+exit /b 0
